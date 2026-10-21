@@ -1,0 +1,71 @@
+name: Validate configs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check docker compose file
+        run: docker compose config -q
+
+      - name: Check prometheus config and alert rules
+        run: |
+          docker run --rm -v "$PWD/prometheus:/etc/prometheus" \
+            --entrypoint promtool prom/prometheus:v2.55.1 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Check alertmanager config
+        run: |
+          docker run --rm -v "$PWD/alertmanager:/etc/alertmanager" \
+            --entrypoint amtool prom/alertmanager:v0.27.0 \
+            check-config /etc/alertmanager/alertmanager.yml
+
+      - name: Check blackbox config
+        run: |
+          docker run --rm -v "$PWD/blackbox:/etc/blackbox" \
+            prom/blackbox-exporter:v0.25.0 \
+            --config.check --config.file=/etc/blackbox/blackbox.yml
+
+      - name: Check dashboards are valid json
+        run: |
+          for f in grafana/dashboards/*.json; do
+            jq empty "$f" && echo "ok: $f"
+          done
+
+  # bring the whole stack up and make sure every target is scraped
+  smoke-test:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start stack
+        run: |
+          ./scripts/setup.sh
+          docker compose up -d
+          sleep 40
+
+      - name: Check services respond
+        run: |
+          curl -sf localhost:9090/-/ready
+          curl -sf localhost:9093/-/ready
+          curl -sf localhost:3001/api/health
+
+      - name: Check prometheus targets
+        run: |
+          curl -s localhost:9090/api/v1/targets \
+            | jq -r '.data.activeTargets[] | "\(.labels.job)\t\(.health)"'
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=50
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
