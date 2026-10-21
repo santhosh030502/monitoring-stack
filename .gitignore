@@ -1,0 +1,3 @@
+.env
+alertmanager/secrets/slack_webhook
+.DS_Store
