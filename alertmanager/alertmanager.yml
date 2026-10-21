@@ -1,0 +1,38 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: slack
+  group_by: [alertname, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: slack
+      repeat_interval: 1h
+
+# if a host is down, don't also spam warnings for the same host
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: [instance]
+
+receivers:
+  - name: slack
+    slack_configs:
+      # webhook url is kept in a file so it never gets committed
+      # see secrets/slack_webhook.example
+      - api_url_file: /etc/alertmanager/secrets/slack_webhook
+        channel: "#alerts"
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+        text: |-
+          {{ range .Alerts }}
+          *Severity:* {{ .Labels.severity }}
+          *Summary:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}

@@ -1,0 +1,93 @@
+groups:
+  - name: instance
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} target is down"
+          description: "{{ $labels.instance }} has not responded for more than 1 minute."
+
+  - name: host
+    rules:
+      - alert: HighCpuUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | printf \"%.1f\" }}% for the last 5 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | printf \"%.1f\" }}%."
+
+      - alert: DiskSpaceLow
+        expr: |
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) * 100 < 15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "{{ $labels.mountpoint }} has only {{ $value | printf \"%.1f\" }}% free."
+
+      - alert: DiskWillFillIn24h
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk on {{ $labels.instance }} will fill up within 24h"
+          description: "Based on the last 6h trend, {{ $labels.mountpoint }} will run out of space."
+
+  - name: containers
+    rules:
+      - alert: ContainerHighMemory
+        expr: |
+          (container_memory_working_set_bytes{name!=""}
+            / container_spec_memory_limit_bytes{name!=""} > 0) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} near memory limit"
+          description: "{{ $labels.name }} is using {{ $value | printf \"%.1f\" }}% of its memory limit."
+
+  - name: endpoints
+    rules:
+      - alert: EndpointDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is not reachable"
+          description: "Blackbox http probe has been failing for 2 minutes."
+
+      - alert: SlowEndpoint
+        expr: probe_duration_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} is slow"
+          description: "Response time is {{ $value | printf \"%.2f\" }}s."
+
+      - alert: SslCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "SSL cert for {{ $labels.instance }} expires soon"
+          description: "Certificate expires in {{ $value | printf \"%.0f\" }} days."
